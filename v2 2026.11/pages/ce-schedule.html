@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>勤務表管理 - CEスケジュール管理システム V2</title>
+    
+    <!-- 外部ライブラリ -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="../css/theme-unified.css?v=20241217">
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+    <script src="../js/config/firebase-config.js"></script>
+    <script src="../js/core/auth-guard.js"></script>
+
+    <!-- 監査ログシステム -->
+<script src="../js/utils/audit-logger.js"></script>
+
+    <style>
+        /* 勤務表管理専用スタイル */
+.schedule-layout {
+    display: flex;
+    /* min-height: 100vh; を削除 */
+}
+
+        .schedule-sidebar {
+            width: 300px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            border-right: 1px solid var(--glass-border);
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease;
+            position: relative;
+            flex-shrink: 0;
+            z-index: 90;
+        }
+
+.schedule-sidebar.collapsed {
+    width: 60px;
+    transform: none;
+}
+
+        .sidebar-content {
+            padding: 20px;
+            width: 300px;
+            transition: opacity 0.3s ease;
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-toggle {
+            position: absolute;
+            top: 15px;
+            right: -15px;
+            background: var(--brand-primary);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            z-index: 101;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            transition: right 0.3s ease;
+        }
+
+        .schedule-sidebar.collapsed .sidebar-toggle {
+            right: -45px;
+        }
+
+.schedule-main {
+    /* flex-grow: 1; を削除 */
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+}
+
+        /* テーブルのスケール表示対応 */
+.work-schedule-table-wrapper {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    margin-top: 20px;
+    margin-bottom: 40px;
+    position: relative;
+    min-height: calc(800px + 336px); /* 14行分(336px)を追加 */
+    overflow: visible; /* スクロール完全無効化 */
+}
+
+        .work-schedule-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9px;
+            min-width: 1000px;
+            transform-origin: top left;
+        }
+
+        .work-schedule-table th,
+        .work-schedule-table td {
+            border: 1px solid #e0e0e0;
+            padding: 2px;
+            text-align: center;
+            vertical-align: middle;
+            height: 24px;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        .work-schedule-table th {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            font-size: 8px;
+        }
+
+        /* 固定列 */
+        .work-schedule-table .name-header,
+        .work-schedule-table .name-cell {
+            position: sticky;
+            left: 30px;
+            background: white;
+            z-index: 15;
+            width: 80px;
+            min-width: 80px;
+            max-width: 80px;
+            text-align: left;
+            padding-left: 6px;
+        }
+
+        .work-schedule-table .name-header {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            z-index: 20;
+        }
+
+        /* 勤務区分別背景色 */
+        .work-schedule-table .work-cell.type-ope { 
+            background: #07E1FF; 
+            color: #1E3A8A; 
+        }
+
+        .work-schedule-table .work-cell.type-ope.status-A1 { 
+            background: #0000FF !important; 
+            color: white !important; 
+        }
+
+        .work-schedule-table .work-cell.type-me { 
+            background: #CCFFCC; 
+            color: #006400; 
+        }
+
+        .work-schedule-table .work-cell.type-hd { 
+            background: #FFBCD4; 
+            color: #8B008B; 
+        }
+
+        .work-schedule-table .work-cell.type-flex { 
+            background: #FFFF00; 
+            color: #B8860B; 
+        }
+
+        /* 非勤務状態(白色表示) */
+        .work-schedule-table .work-cell.status-非,
+        .work-schedule-table .work-cell.status-×,
+        .work-schedule-table .work-cell.status-年,
+        .work-schedule-table .work-cell.status-出,
+        .work-schedule-table .work-cell.status-研 {
+            background: white !important;
+            color: #333 !important;
+            border: 1px solid #ddd !important;
+        }
+
+                /* 自由入力テキスト(白色表示) */
+        .work-schedule-table .work-cell.status-text {
+            background: #FFFFFF !important;
+            color: #333 !important;
+            border: 1px solid #ddd !important;
+        }
+
+        /* 休日セル */
+        .work-schedule-table .work-cell.holiday {
+            background: white !important;
+            color: #333 !important;
+            border: 1px solid #ddd !important;
+        }
+
+        /* 希望勤務 */
+        .work-schedule-table .work-cell.desired {
+            text-decoration: underline;
+            text-decoration-thickness: 1px;
+            text-underline-offset: 2px;
+        }
+
+        /* サマリーセル */
+        .work-schedule-table .summary-cell {
+            background: #f8f9fa;
+            font-weight: 500;
+            width: 30px;
+            min-width: 30px;
+            max-width: 30px;
+            font-size: 7px;
+        }
+
+        /* 集計行スタイル */
+        .work-schedule-table .footer-summary-row {
+            background: #f1f3f4 !important;
+            border-top: 2px solid #dee2e6 !important;
+        }
+
+        .work-schedule-table .footer-summary-row td {
+            font-weight: 600;
+            font-size: 7px;
+            padding: 1px !important;
+        }
+
+        .work-schedule-table .type-label {
+            background: #e9ecef !important;
+            font-weight: 700;
+            text-align: left !important;
+            padding-left: 3px !important;
+        }
+
+        .work-schedule-table .warning-count {
+            color: #dc3545 !important;
+            font-weight: 700;
+            background: #ffe6e6 !important;
+        }
+
+        /* スマートフォン対応 */
+        @media (max-width: 768px) {
+            .schedule-sidebar {
+                position: fixed;
+                top: 0;
+                bottom: 0;
+                left: -300px;
+                width: 300px;
+                height: 100vh;
+                transform: translateX(0);
+                transition: left 0.3s ease;
+                z-index: 1000;
+                background: rgba(255, 255, 255, 0.98);
+                backdrop-filter: blur(10px);
+                border-radius: 0 8px 8px 0;
+                border-right: 2px solid #e5e7eb;
+                overflow-y: auto;
+                box-shadow: 2px 0 20px rgba(0, 0, 0, 0.15);
+            }
+            
+            .schedule-sidebar.expanded {
+                left: 0;
+            }
+            
+            .sidebar-toggle {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                background: var(--brand-primary);
+                color: white;
+                border-radius: 50%;
+                width: 56px;
+                height: 56px;
+                border: none;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                z-index: 1001;
+                font-size: 18px;
+            }
+            
+            .schedule-main {
+                margin-left: 0;
+                padding: 12px;
+                padding-bottom: 80px;
+                width: 100%;
+            }
+        }
+
+        /* サイドバー収納時の完全非表示 */
+.schedule-sidebar.collapsed .sidebar-content {
+    opacity: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+/* No列の固定スタイル */
+.work-schedule-table .no-header,
+.work-schedule-table .no-cell {
+    position: sticky;
+    left: 0;
+    background: white;
+    z-index: 15;
+    width: 30px;
+    min-width: 30px;
+    max-width: 30px;
+}
+
+.work-schedule-table .no-header {
+    background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+    z-index: 20;
+}
+
+/* CE番号アイコン */
+.work-schedule-table .ce-number {
+    background: var(--brand-primary);
+    color: white;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: bold;
+    margin: 0 auto;
+}
+
+/* 日付列幅統一 */
+.work-schedule-table .date-col {
+    width: 24px;
+    min-width: 24px;
+    max-width: 24px;
+}
+        
+        /* ページ全体スクロール有効化 */
+html, body {
+    height: auto;
+    overflow-y: auto;
+}
+
+.schedule-main { 
+    overflow: visible; 
+}
+
+/* シンプルヘッダーレイアウト */
+.simple-header {
+    margin-bottom: 20px;
+}
+
+/* 勤務表期間コントロール */
+.schedule-period-controls {
+    background: var(--glass-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.period-display {
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: #1f2937;
+}
+
+.period-details {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 12px;
+}
+
+.control-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+    .schedule-period-controls {
+        padding: 12px;
+    }
+    
+    .period-display {
+        font-size: 16px;
+    }
+}
+        
+        /* ページ全体スクロール有効化 */
+html, body {
+    height: auto;
+    overflow-y: auto;
+}
+
+/* テーブル内スクロール完全無効化 */
+.work-schedule-table-wrapper {
+    overflow: visible !important;
+    height: auto !important;
+}
+
+.work-schedule-table {
+    overflow: visible !important;
+    height: auto !important;
+}
+        
+    </style>
+</head>
+<body class="theme-unified">
+    <!-- ローディング -->
+    <div id="loading" class="center-layout">
+        <div class="glass-card center-card text-center">
+            <div class="spinner mb-4"></div>
+            <p class="text-gray-600">勤務表管理を読み込んでいます...</p>
+        </div>
+    </div>
+
+    <!-- メインインターフェース -->
+    <div id="mainInterface" class="schedule-layout" style="display:none;">
+        <!-- サイドバー -->
+        <div id="sidebar" class="schedule-sidebar">
+            <button id="toggleSidebar" class="sidebar-toggle" title="サイドバー表示/非表示">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+            
+            <div class="sidebar-content">
+                <!-- ヘッダー -->
+                <div class="mb-6 text-center">
+                    <h1 class="text-lg font-bold text-gray-800 mb-2">
+                        <i class="fas fa-table mr-2 text-green-600"></i>
+                        勤務表管理
+                    </h1>
+                    <p class="text-xs text-gray-600">CEスケジュール管理システム V2</p>
+                    <div class="mt-3 text-xs text-gray-600">
+                        <span id="currentUserDisplay">ユーザー</span>
+                    </div>
+                </div>
+
+                <!-- 同期ステータス -->
+                <div class="mb-4">
+                    <div id="mainSyncStatus" class="sync-indicator connected">
+                        <div class="sync-dot pulse"></div>
+                        <span class="text-xs">リアルタイム同期中</span>
+                    </div>
+                </div>
+
+                <!-- 勤務表操作(管理者のみ) -->
+                <div id="adminScheduleActions" class="mb-6" style="display:none;">
+                    <h3 class="text-sm font-semibold mb-3">
+                        <i class="fas fa-plus mr-2"></i>勤務表操作
+                    </h3>
+                    <div class="space-y-2">
+                        <button id="createScheduleBtn" class="btn-unified btn-primary-unified btn-small w-full">
+                            <i class="fas fa-edit mr-1"></i>勤務表を作成・編集
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 表示フィルタ -->
+                <div class="mb-6">
+                    <h3 class="text-sm font-semibold mb-3">
+                        <i class="fas fa-filter mr-2"></i>表示フィルタ
+                    </h3>
+                    <div class="space-y-2">
+                        <div class="flex items-center">
+                            <input type="radio" id="showFuture" name="timeFilter" class="mr-2" checked>
+                            <label for="showFuture" class="text-xs">今後の勤務表</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="radio" id="showPast" name="timeFilter" class="mr-2">
+                            <label for="showPast" class="text-xs">以前の勤務表</label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="radio" id="showAll" name="timeFilter" class="mr-2">
+                            <label for="showAll" class="text-xs">公開済み全て</label>
+                        </div>
+                        <div class="flex items-center" id="adminFilterContainer" style="display:none;">
+                            <input type="checkbox" id="showHidden" class="mr-2">
+                            <label for="showHidden" class="text-xs">非公開</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ナビゲーション -->
+                <div class="mt-auto pt-4 border-t border-gray-200">
+                    <div class="space-y-2">
+                        <a href="./home.html" class="btn-unified btn-outline-unified btn-small w-full">
+                            <i class="fas fa-home mr-1"></i>HOME
+                        </a>
+                        <button onclick="window.handleLogout()" 
+                                class="btn-unified btn-outline-unified btn-small w-full text-red-600 border-red-600">
+                            <i class="fas fa-sign-out-alt mr-1"></i>ログアウト
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- メインコンテンツ -->
+        <div class="schedule-main">
+
+            <!-- シンプルヘッダー -->
+            <div class="simple-header">
+                <h2 class="text-2xl font-bold text-gray-800 mb-2">勤務表管理</h2>
+                <p class="text-gray-600">作成済みの勤務表の閲覧・管理を行います</p>
+            </div>
+
+            <!-- 勤務表表示エリア -->
+            <div id="workScheduleDisplayArea">
+                <div class="text-center py-12 text-gray-500">
+                    <i class="fas fa-table text-4xl mb-4"></i>
+                    <h3 class="text-lg font-semibold mb-2">CE勤務表</h3>
+                    <p class="mb-4">作成済みの勤務表がここに表示されます</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 軽量メッセージ機能
+        window.showMessage = window.showMessage || function(msg, type='info') {
+            let cont = document.getElementById('messageContainer');
+            if (!cont) {
+                cont = document.createElement('div');
+                cont.id = 'messageContainer';
+                cont.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999;width:min(92vw,480px);';
+                document.body.appendChild(cont);
+            }
+            const div = document.createElement('div');
+            div.className = `status-unified ${type}`;
+            div.style.marginBottom = '8px';
+            div.textContent = msg;
+            cont.appendChild(div);
+            setTimeout(() => div.remove(), 5000);
+        };
+
+        // ログアウト処理
+window.handleLogout = async () => {
+    try {
+        // 監査ログ記録(共通ロガー使用)
+        if (window.auditLogger) {
+            await window.auditLogger.logAction('logout');
+        }
+
+        if (window.auth && window.auth.currentUser) {
+            await window.auth.signOut();
+        }
+    } catch (error) {
+        console.error('ログアウトエラー:', error);
+    } finally {
+        sessionStorage.clear();
+        localStorage.clear();
+        window.location.href = '../index.html';
+    }
+};
+
+
+        // 勤務表管理クラス
+class CEScheduleManager {
+    constructor() {
+        this.schedules = [];
+        this.currentPeriodIndex = 0;
+        this.availablePeriods = [];
+        this.realtimeListener = null;
+        this.isInitialized = false;
+        this.currentFilter = 'future';
+        
+        // ★ この部分を追加 ★
+this.footerTypes = [
+    { label: '当直', filter: (ce, status, effectiveType) => status === 'B', target: 1 },
+    { label: '非番', filter: (ce, status, effectiveType) => status === '非', target: 1 },
+    { label: 'OPE(A)', filter: (ce, status, effectiveType) => effectiveType === 'OPE' && status === 'A', target: null },
+    { label: 'OPE(A1)', filter: (ce, status, effectiveType) => effectiveType === 'OPE' && status === 'A1', target: null },
+    { label: 'ME', filter: (ce, status, effectiveType) => effectiveType === 'ME' && ['A', 'A1', 'B', '非', '年', '出', '研'].includes(status), target: null },
+    { label: 'HD', filter: (ce, status, effectiveType) => effectiveType === 'HD' && ['A', 'A1', 'B', '非', '年', '出', '研'].includes(status), target: null },
+    { label: 'FLEX', filter: (ce, status, effectiveType) => effectiveType === 'FLEX' && ['A', 'A1', 'B', '非', '年', '出', '研'].includes(status), target: null }
+];
+    }
+
+            async init() {
+                if (this.isInitialized) return;
+                this.isInitialized = true;
+
+                try {
+                    // 認証ガード実行
+                    const authSuccess = await AuthGuard.init();
+                    if (!authSuccess) return;
+
+                    // ユーザーデータ取得
+                    const userData = await AuthGuard.getUserData();
+                    if (!userData || !userData.setupCompleted) {
+                        console.error('ユーザーデータ不正:', userData);
+                        location.href = '../index.html';
+                        return;
+                    }
+
+                    window.userRole = userData.role || 'viewer';
+                    const __session_ug = (window.AuthGuard && window.AuthGuard.getSession) ?
+                        window.AuthGuard.getSession() : {};
+                    window.currentUserData = {
+                        ...userData,
+                        uid: userData.uid || __session_ug.uid || sessionStorage.getItem('targetUID') || '',
+                        username: userData.username || __session_ug.username || sessionStorage.getItem('currentUsername') || '',
+                        displayName: userData.displayName || userData.username || __session_ug.username || 'ユーザー',
+                        role: userData.role || __session_ug.role || sessionStorage.getItem('userRole') || 'viewer'
+                    };
+
+                    this.showInterface();
+                    this.setupEventListeners();
+                    await this.loadAvailablePeriods();
+                    
+                    console.log('✅ 勤務表管理初期化完了');
+                } catch (error) {
+                    console.error('勤務表管理初期化エラー:', error);
+                    location.href = '../index.html';
+                }
+            }
+
+            showInterface() {
+                const loadingEl = document.getElementById('loading');
+                const mainEl = document.getElementById('mainInterface');
+                if (loadingEl) loadingEl.style.display = 'none';
+                if (mainEl) mainEl.style.display = 'flex';
+
+                this.updateUserDisplay();
+                
+                // 管理者のみの機能表示
+                if (window.userRole === 'admin') {
+                    document.getElementById('adminScheduleActions').style.display = 'block';
+                    document.getElementById('adminFilterContainer').style.display = 'flex';
+                }
+            }
+
+            updateUserDisplay() {
+                const userData = window.currentUserData;
+                if (!userData) return;
+                
+                const displayName = userData.displayName || userData.username || 'ユーザー';
+                document.querySelectorAll('#currentUserDisplay').forEach(el => {
+                    el.textContent = displayName;
+                });
+            }
+
+            setupEventListeners() {
+                // サイドバートグル
+                const toggle = document.getElementById('toggleSidebar');
+                const sidebar = document.getElementById('sidebar');
+                
+                if (toggle && sidebar) {
+                    let isCollapsed = false;
+                    toggle.onclick = () => {
+                        isCollapsed = !isCollapsed;
+                        if (isCollapsed) {
+                            sidebar.classList.add('collapsed');
+                            toggle.querySelector('i').className = 'fas fa-chevron-right';
+                        } else {
+                            sidebar.classList.remove('collapsed');
+                            toggle.querySelector('i').className = 'fas fa-chevron-left';
+                        }
+                        
+                        if (window.matchMedia('(max-width: 768px)').matches) {
+                            sidebar.classList.toggle('expanded');
+                        }
+                    };
+                }
+
+                // 勤務表作成(管理者のみ)
+                const createBtn = document.getElementById('createScheduleBtn');
+                if (createBtn) {
+                    createBtn.onclick = () => this.openScheduleEditor();
+                }
+
+// 期間ナビゲーション
+const prevBtn = document.getElementById('prevPeriodBtn');
+const nextBtn = document.getElementById('nextPeriodBtn');
+
+// 「前の期間」は新しい期間(-1)、「次の期間」は古い期間(+1)
+// ※配列は古い順(開始日昇順)なので、インデックスが大きいほど新しい
+if (prevBtn) prevBtn.onclick = () => this.navigatePeriod(-1);
+if (nextBtn) nextBtn.onclick = () => this.navigatePeriod(1);
+
+                // フィルタ変更
+                ['showFuture', 'showPast', 'showAll', 'showHidden'].forEach(id => {
+                    const element = document.getElementById(id);
+                    if (element) {
+                        element.onchange = () => this.applyFilters();
+                    }
+                });
+
+                // テーブルスケール調整(リサイズ時)
+                let resizeTimer = null;
+                window.addEventListener('resize', () => {
+                    clearTimeout(resizeTimer);
+                    resizeTimer = setTimeout(() => {
+                        if (this.isInitialized) this.fitTableToViewport();
+                    }, 250);
+                });
+
+                // リアルタイム更新
+                this.setupRealtimeUpdates();
+            }
+
+            setupRealtimeUpdates() {
+                try {
+                    if (this.realtimeListener) {
+                        this.realtimeListener.off();
+                    }
+                    
+                    this.realtimeListener = window.database.ref(`${window.DATA_ROOT}/workSchedules`);
+                    this.realtimeListener.on('value', async () => {
+                        console.log('🔄 公開勤務表データ更新検知');
+                        await this.loadAvailablePeriods();
+                        this.displayCurrentPeriod();
+                    });
+                } catch (error) {
+                    console.warn('リアルタイム更新設定失敗:', error);
+                }
+            }
+
+async loadAvailablePeriods() {
+    try {
+        const snapshot = await window.database.ref(`${window.DATA_ROOT}/workSchedules`).once('value');
+        const data = snapshot.val() || {};
+        
+        const today = new Date().toISOString().slice(0, 10);
+        
+        // 1. フィルタリング
+        this.availablePeriods = Object.keys(data)
+            .map(periodKey => ({
+                key: periodKey,
+                ...data[periodKey].metadata
+            }))
+            .filter(period => {
+                // 管理者以外は非公開を除外
+                if (window.userRole !== 'admin' && period.isVisible === false) {
+                    return false;
+                }
+                
+                // フィルタ適用
+                return this.applyTimeFilter(period, today);
+            })
+            // 2. ★★★ 時系列ソート(期間開始日順: 古い→新しい) ★★★
+            .sort((a, b) => {
+                const dateA = a.startDate || '';
+                const dateB = b.startDate || '';
+                return dateA.localeCompare(dateB);
+            });
+        
+        if (this.availablePeriods.length > 0) {
+            // 3. ★★★ アクセス日を含む勤務表を検索 ★★★
+            const periodsContainingToday = this.availablePeriods
+                .map((period, index) => ({ period, index }))
+                .filter(({ period }) => {
+                    return today >= period.startDate && today <= period.endDate;
+                });
+            
+            if (periodsContainingToday.length > 0) {
+                // 4. ★★★ 複数ある場合は最新版(公開日時が新しい方)を選択 ★★★
+                periodsContainingToday.sort((a, b) => {
+                    const timeA = a.period.publishedAt || a.period.createdAt || 0;
+                    const timeB = b.period.publishedAt || b.period.createdAt || 0;
+                    return timeB - timeA; // 新しい順
+                });
+                
+                this.currentPeriodIndex = periodsContainingToday[0].index;
+                console.log(`📅 アクセス日(${today})を含む勤務表を選択: ${periodsContainingToday[0].period.startDate} ～ ${periodsContainingToday[0].period.endDate}`);
+            } else {
+                // アクセス日を含む勤務表がない場合は、最新の勤務表を選択
+                this.currentPeriodIndex = this.availablePeriods.length - 1;
+                console.log('📅 アクセス日を含む勤務表なし、最新の勤務表を選択');
+            }
+            
+            this.displayCurrentPeriod();
+        } else {
+            this.displayNoPeriods();
+        }
+        
+        console.log(`✅ 公開勤務表読み込み完了: ${this.availablePeriods.length}件 (時系列ソート済み)`);
+    } catch (error) {
+        console.error('❌ 期間データ読み込みエラー:', error);
+        window.showMessage('勤務表データの読み込みに失敗しました', 'error');
+    }
+}
+
+            applyTimeFilter(period, today) {
+                const showFuture = document.getElementById('showFuture')?.checked;
+                const showPast = document.getElementById('showPast')?.checked;
+                const showAll = document.getElementById('showAll')?.checked;
+                
+                if (showAll) {
+                    return true;
+                }
+                
+                if (showFuture) {
+                    return period.endDate >= today; // 今日を含む以降
+                }
+                
+                if (showPast) {
+                    return period.endDate < today; // 今日を含まない以前
+                }
+                
+                return true; // デフォルト
+            }
+
+            applyFilters() {
+                this.loadAvailablePeriods();
+            }
+
+            navigatePeriod(direction) {
+                const newIndex = this.currentPeriodIndex + direction;
+                
+                if (newIndex < 0 || newIndex >= this.availablePeriods.length) {
+                    window.showMessage('これ以上の期間はありません', 'info');
+                    return;
+                }
+                
+                this.currentPeriodIndex = newIndex;
+                this.displayCurrentPeriod();
+            }
+
+            async displayCurrentPeriod() {
+                if (this.availablePeriods.length === 0) {
+                    this.displayNoPeriods();
+                    return;
+                }
+
+                const currentPeriod = this.availablePeriods[this.currentPeriodIndex];
+                await this.renderWorkScheduleTable(currentPeriod.key);
+            }
+            
+reattachPeriodControls() {
+    // 期間ナビゲーションボタンのイベントリスナーを再設定
+    const prevBtn = document.getElementById('prevPeriodBtn');
+    const nextBtn = document.getElementById('nextPeriodBtn');
+    
+    if (prevBtn) prevBtn.onclick = () => this.navigatePeriod(-1);
+    if (nextBtn) nextBtn.onclick = () => this.navigatePeriod(1);
+                
+                // 管理者コントロールを表示
+                const adminControlsEl = document.getElementById('adminControlsContainer');
+                if (adminControlsEl && window.userRole === 'admin') {
+                    const currentPeriod = this.availablePeriods[this.currentPeriodIndex];
+                    adminControlsEl.innerHTML = this.renderAdminControls(currentPeriod);
+                    adminControlsEl.style.display = 'inline-flex';
+                    adminControlsEl.style.gap = '8px';
+                }
+            }
+
+    renderAdminControls(period) {
+    const currentPriority = period.priority ?? 0;
+    return `
+        <select onchange="window.ceScheduleManager.setPriority('${period.key}', this.value)"
+                class="btn-unified btn-small"
+                title="優先度設定(複数勤務表が重複時、数値が大きい方が採用されます)"
+                style="padding: 4px 8px;">
+            <option value="0" ${currentPriority === 0 ? 'selected' : ''}>📋 仮公開 (0)</option>
+            <option value="50" ${currentPriority === 50 ? 'selected' : ''}>📋 通常 (50)</option>
+            <option value="100" ${currentPriority === 100 ? 'selected' : ''}>⭐ 正式版 (100)</option>
+            <option value="200" ${currentPriority === 200 ? 'selected' : ''}>🔥 最優先 (200)</option>
+        </select>
+        <button onclick="window.ceScheduleManager.toggleVisibility('${period.key}')" 
+                class="btn-unified btn-small ${period.isVisible === false ? 'btn-success' : 'btn-warning'}" 
+                title="表示/非表示切替">
+            <i class="fas fa-eye${period.isVisible === false ? '' : '-slash'}"></i>
+            ${period.isVisible === false ? '公開' : '非公開'}
+        </button>
+        <button onclick="window.ceScheduleManager.deleteSchedule('${period.key}')" 
+                class="btn-unified btn-small btn-danger" title="削除">
+            <i class="fas fa-trash"></i>削除
+        </button>
+    `;
+}
+
+            displayNoPeriods() {
+                const displayEl = document.getElementById('currentPeriodDisplay');
+                const detailsEl = document.getElementById('periodDetails');
+                const areaEl = document.getElementById('workScheduleDisplayArea');
+                const adminControlsEl = document.getElementById('adminControlsContainer');
+                
+                if (displayEl) displayEl.textContent = '該当する勤務表なし';
+                if (detailsEl) detailsEl.textContent = '';
+                if (areaEl) {
+                    const createButton = window.userRole === 'admin' ? 
+                        `<button onclick="window.ceScheduleManager.openScheduleEditor()" 
+                                class="btn-unified btn-primary-unified">
+                            <i class="fas fa-plus mr-2"></i>最初の勤務表を作成
+                        </button>` : '';
+                    
+                    areaEl.innerHTML = `
+                        <div class="text-center py-12">
+                            <i class="fas fa-calendar-plus text-4xl text-gray-400 mb-4"></i>
+                            <h3 class="text-lg font-semibold text-gray-600 mb-2">CE勤務表</h3>
+                            <p class="text-gray-500 mb-4">該当する勤務表がありません</p>
+                            ${createButton}
+                        </div>
+                    `;
+                }
+                if (adminControlsEl) adminControlsEl.style.display = 'none';
+            }
+
+            async renderWorkScheduleTable(periodKey) {
+                const areaEl = document.getElementById('workScheduleDisplayArea');
+                if (!areaEl) return;
+
+                try {
+                    const snapshot = await window.database.ref(`${window.DATA_ROOT}/workSchedules/${periodKey}`).once('value');
+                    const periodData = snapshot.val();
+                    
+                    if (!periodData || !periodData.ceList) {
+                        areaEl.innerHTML = `
+                            <div class="text-center py-8">
+                                <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-4"></i>
+                                <p class="text-gray-600">勤務表データまたはCEリストが見つかりません</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    const scheduleData = periodData.scheduleData || {};
+                    const ceList = periodData.ceList;
+                    const workTypeOverrides = periodData.workTypeOverrides || {};
+                    const dateOverrides = periodData.dateOverrides || {};  // ← この行を追加
+                    const metadata = periodData.metadata || {};
+                    const dates = this.generateDateRange(new Date(metadata.startDate), new Date(metadata.endDate));
+
+                    // 期間コントロールと勤務表を表示
+                    const visibilityStatus = metadata.isVisible === false ? ' <span style="color:#ef4444;">(非公開)</span>' : '';
+                    areaEl.innerHTML = `
+                        <div class="schedule-period-controls">
+                            <div id="currentPeriodDisplay" class="period-display">${metadata.startDate} ～ ${metadata.endDate}${visibilityStatus}</div>
+                            <div id="periodDetails" class="period-details">
+                                (${this.currentPeriodIndex + 1}/${this.availablePeriods.length})
+                                ${metadata.publishedBy ? ` / 作成者: ${metadata.publishedBy}` : ''}
+                                ${metadata.publishedAt ? ` / 公開: ${new Date(metadata.publishedAt).toLocaleString('ja-JP')}` : ''}
+                            </div>
+                            <div class="control-buttons">
+                                <button id="prevPeriodBtn" class="btn-unified btn-outline-unified btn-small">
+                                    <i class="fas fa-chevron-left mr-1"></i>前の期間
+                                </button>
+                                <button id="nextPeriodBtn" class="btn-unified btn-outline-unified btn-small">
+                                    次の期間<i class="fas fa-chevron-right ml-1"></i>
+                                </button>
+                                <span id="adminControlsContainer" style="display:none;">
+                                    <!-- 管理者操作ボタンがここに表示 -->
+                                </span>
+                            </div>
+                        </div>
+                        <div class="work-schedule-table-wrapper">
+                            <table class="work-schedule-table">
+                            ${this.generateTableHTML(dates, scheduleData, ceList, workTypeOverrides, dateOverrides)}
+                            </table>
+                        </div>
+                    `;
+                    
+                    // イベントリスナーを再設定
+                    this.reattachPeriodControls();
+
+                } catch (error) {
+                    console.error('❌ 勤務表表示エラー:', error);
+                    areaEl.innerHTML = `
+                        <div class="text-center py-8">
+                            <i class="fas fa-exclamation-triangle text-4xl text-red-500 mb-4"></i>
+                            <p class="text-gray-600">勤務表の読み込みでエラーが発生しました</p>
+                        </div>
+                    `;
+                }
+            }
+
+            // テーブルを画面にフィット
+            // テーブル最適表示(完全修正版)
+fitTableToViewport() {
+    const table = document.querySelector('.work-schedule-table');
+    if (!table) return;
+    
+    // スケーリングを無効化して実寸表示
+    table.style.transform = 'none';
+    table.style.fontSize = '9px';
+    
+    console.log('📏 テーブル実寸表示モード');
+}
+
+            generateDateRange(startDate, endDate) {
+                const dates = [];
+                const current = new Date(startDate);
+                
+                while (current <= endDate) {
+                    dates.push(new Date(current));
+                    current.setDate(current.getDate() + 1);
+                }
+                
+                return dates;
+            }
+
+            formatDate(date) {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            }
+
+             // 祝日判定(簡易実装)
+            isJapaneseHoliday(date) {
+                const holidays = new Set([
+                    // 2024年
+                    '2024-01-01', // 元日
+                    '2024-01-08', // 成人の日
+                    '2024-02-11', // 建国記念の日
+                    '2024-02-12', // 振替休日
+                    '2024-02-23', // 天皇誕生日
+                    '2024-03-20', // 春分の日
+                    '2024-04-29', // 昭和の日
+                    '2024-05-03', // 憲法記念日
+                    '2024-05-04', // みどりの日
+                    '2024-05-05', // こどもの日
+                    '2024-05-06', // 振替休日
+                    '2024-07-15', // 海の日
+                    '2024-08-11', // 山の日
+                    '2024-08-12', // 振替休日
+                    '2024-09-16', // 敬老の日
+                    '2024-09-22', // 秋分の日
+                    '2024-09-23', // 振替休日
+                    '2024-10-14', // スポーツの日
+                    '2024-11-03', // 文化の日
+                    '2024-11-04', // 振替休日
+                    '2024-11-23', // 勤労感謝の日
+                    
+                    // 2025年
+                    '2025-01-01', // 元日
+                    '2025-01-13', // 成人の日
+                    '2025-02-11', // 建国記念の日
+                    '2025-02-23', // 天皇誕生日
+                    '2025-02-24', // 振替休日
+                    '2025-03-20', // 春分の日
+                    '2025-04-29', // 昭和の日
+                    '2025-05-03', // 憲法記念日
+                    '2025-05-04', // みどりの日
+                    '2025-05-05', // こどもの日
+                    '2025-05-06', // 振替休日
+                    '2025-07-21', // 海の日
+                    '2025-08-11', // 山の日
+                    '2025-09-15', // 敬老の日
+                    '2025-09-23', // 秋分の日
+                    '2025-10-13', // スポーツの日
+                    '2025-11-03', // 文化の日
+                    '2025-11-23', // 勤労感謝の日
+                    '2025-11-24', // 振替休日
+                    
+                    // 2026年
+                    '2026-01-01', // 元日
+                    '2026-01-12', // 成人の日
+                    '2026-02-11', // 建国記念の日
+                    '2026-02-23', // 天皇誕生日
+                    '2026-03-20', // 春分の日
+                    '2026-04-29', // 昭和の日
+                    '2026-05-03', // 憲法記念日
+                    '2026-05-04', // みどりの日
+                    '2026-05-05', // こどもの日
+                    '2026-05-06', // 振替休日
+                    '2026-07-20', // 海の日
+                    '2026-08-11', // 山の日
+                    '2026-09-21', // 敬老の日
+                    '2026-09-22', // 国民の休日
+                    '2026-09-23', // 秋分の日
+                    '2026-10-12', // スポーツの日
+                    '2026-11-03', // 文化の日
+                    '2026-11-23'  // 勤労感謝の日
+                ]);
+
+                const dateKey = this.formatDate(date);
+                return holidays.has(dateKey);
+            }
+
+            getEffectiveWorkType(ceId, dateKey, ceList, workTypeOverrides) {
+                const ce = ceList.find(c => c.id === ceId);
+                if (!ce) return 'ME';
+
+                const overrides = workTypeOverrides[ceId];
+                if (Array.isArray(overrides)) {
+                    const validOverrides = overrides
+                        .filter(override => dateKey >= override.startDate && dateKey <= override.endDate)
+                        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                    
+                    if (validOverrides.length > 0) {
+                        return validOverrides[0].workType;
+                    }
+                } else if (overrides && overrides.startDate && dateKey >= overrides.startDate && dateKey <= overrides.endDate) {
+                    return overrides.workType;
+                }
+                
+                return ce.workType || 'ME';
+            }
+
+            generateTableHTML(dates, scheduleData, ceList, workTypeOverrides, dateOverrides = {}) {
+               // 日付オーバーライド対応の休日判定
+                const isWeekendOrHolidayWithOverride = (date) => {
+                    const dateKey = this.formatDate(date);
+                    
+                    // オーバーライドが設定されている場合は優先
+                    if (dateOverrides[dateKey] === 'holiday') {
+                        return true;
+                    }
+                    if (dateOverrides[dateKey] === 'workday') {
+                        return false;
+                    }
+                    
+                    // デフォルトの判定
+                    return date.getDay() === 0 || date.getDay() === 6 || this.isJapaneseHoliday(date);
+                };
+                
+    // ヘッダー(No + 氏名)
+    let html = '<thead><tr><th class="no-header">No</th><th class="name-header">氏名</th>';
+    
+    dates.forEach((date, index) => {
+    const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()];
+    const isHoliday = this.isJapaneseHoliday(date);
+    let headerClass = '';
+
+    if (date.getDay() === 0 || isHoliday) {
+        headerClass = 'text-red-600';
+    } else if (date.getDay() === 6) {
+        headerClass = 'text-blue-600';
+    }
+
+    // 月表示: 先頭列または前日と月が変わる列だけ表示
+    const prevDate = index > 0 ? dates[index - 1] : null;
+    const showMonth = index === 0 || !prevDate || prevDate.getMonth() !== date.getMonth();
+    const monthLabel = showMonth ? `${date.getMonth() + 1}月` : '&nbsp;';
+
+    html += `
+        <th class="date-col">
+            <div class="text-[10px] leading-tight font-semibold text-gray-500">${monthLabel}</div>
+            <div class="leading-tight">${date.getDate()}</div>
+            <div class="text-xs leading-tight ${headerClass}">${dayOfWeek}</div>
+        </th>
+    `;
+});
+    
+    const summaryHeaders = ['A', 'A1', 'B', '非', '×', '休日数', '実勤務', '当直回数'];
+    summaryHeaders.forEach(h => html += `<th class="summary-cell">${h}</th>`);
+    html += '</tr></thead><tbody>';
+    
+    ceList.forEach((ce, index) => {
+        const fullName = ce.fullName || ce.name || '';
+        html += `<tr><td class="no-cell"><div class="ce-number">${index + 1}</div></td><td class="name-cell"><div class="font-medium">${fullName}</div></td>`;
+        
+        const summary = { A: 0, A1: 0, B: 0, non: 0, off: 0, holidays: 0, actual: 0, night: 0 };
+        
+        dates.forEach(date => {
+            const dateKey = this.formatDate(date);
+            const workData = scheduleData[ce.id]?.[dateKey] || {};
+            const isWeekendOrHoliday = isWeekendOrHolidayWithOverride(date);
+            
+            // テキスト優先表示の修正
+            const displayStatus = workData.customText?.trim() || workData.status || (isWeekendOrHoliday ? '×' : 'A');
+            
+            if (isWeekendOrHoliday) summary.holidays++;
+            switch (workData.status || (isWeekendOrHoliday ? '×' : 'A')) {
+                case 'A': summary.A++; summary.actual++; break;
+                case 'A1': summary.A1++; summary.actual++; break;
+                case 'B': summary.B++; summary.actual++; summary.night++; break;
+                case '非': summary.non++; summary.actual++; break;
+                case '×': summary.off++; break;
+                case '年': summary.actual++; break;
+                case '出': summary.actual++; break;
+                case '研': summary.actual++; break;
+            }
+            
+            const effectiveWorkType = this.getEffectiveWorkType(ce.id, dateKey, ceList, workTypeOverrides);
+            let cellClass = `work-cell date-col type-${effectiveWorkType.toLowerCase()}`;
+            
+            if (workData.status) {
+                cellClass += ` status-${workData.status}`;
+            }
+            if (workData.customText?.trim()) {
+                cellClass += ' status-text';
+            }
+            if (workData.desired) {
+                cellClass += ' desired';
+            }
+            if (isWeekendOrHoliday) {
+                cellClass += ' holiday';
+            }
+            
+            html += `<td class="${cellClass}">${displayStatus}</td>`;
+        });
+        
+        [summary.A, summary.A1, summary.B, summary.non, summary.off, summary.holidays, summary.actual, summary.night].forEach(v => {
+            html += `<td class="summary-cell">${v}</td>`;
+        });
+        html += '</tr>';
+    });
+    
+    html += '</tbody><tfoot>';
+    this.footerTypes.forEach(type => {
+        html += `<tr class="footer-summary-row"><th class="type-label" colspan="2">${type.label}</th>`;
+        
+        dates.forEach(date => {
+            const dateKey = this.formatDate(date);
+            let count = 0;
+            ceList.forEach(ce => {
+                const workData = scheduleData[ce.id]?.[dateKey] || {};
+                const isWeekendOrHoliday = isWeekendOrHolidayWithOverride(date);
+                const status = workData.status || (isWeekendOrHoliday ? '×' : 'A');
+                const effectiveType = this.getEffectiveWorkType(ce.id, dateKey, ceList, workTypeOverrides);
+                if (type.filter(ce, status, effectiveType)) count++;
+            });
+            const warn = (type.target !== null && count !== type.target) ? 'warning-count' : '';
+            html += `<td class="date-col ${warn}">${count}</td>`;
+        });
+        
+        summaryHeaders.forEach(() => html += '<td class="summary-cell"></td>');
+        html += '</tr>';
+    });
+    
+    return html + '</tfoot>';
+}
+
+    async setPriority(periodKey, priorityValue) {
+    if (window.userRole !== 'admin') {
+        window.showMessage('管理者権限が必要です', 'warning');
+        return;
+    }
+
+    try {
+        const priority = parseInt(priorityValue, 10) || 0;
+        await window.database
+            .ref(`${window.DATA_ROOT}/workSchedules/${periodKey}/metadata/priority`)
+            .set(priority);
+        
+        const labelMap = { 0: '仮公開', 50: '通常', 100: '正式版', 200: '最優先' };
+        window.showMessage(`優先度を「${labelMap[priority] || priority}」に設定しました`, 'success');
+        
+        await this.loadAvailablePeriods();
+        
+    } catch (error) {
+        console.error('❌ 優先度設定エラー:', error);
+        window.showMessage('優先度の設定に失敗しました', 'error');
+    }
+}
+
+            async toggleVisibility(periodKey) {
+                if (window.userRole !== 'admin') {
+                    window.showMessage('管理者権限が必要です', 'warning');
+                    return;
+                }
+
+                try {
+                    const snapshot = await window.database.ref(`${window.DATA_ROOT}/workSchedules/${periodKey}/metadata`).once('value');
+                    const metadata = snapshot.val();
+                    
+                    const newVisibility = !(metadata?.isVisible !== false);
+                    await window.database.ref(`${window.DATA_ROOT}/workSchedules/${periodKey}/metadata/isVisible`).set(newVisibility);
+                    
+                    window.showMessage(`勤務表を${newVisibility ? '表示' : '非表示'}に設定しました`, 'success');
+                    
+                    await this.loadAvailablePeriods();
+                    
+                } catch (error) {
+                    console.error('❌ 表示切替エラー:', error);
+                    window.showMessage('表示設定の変更に失敗しました', 'error');
+                }
+            }
+
+            async deleteSchedule(periodKey) {
+                if (window.userRole !== 'admin') {
+                    window.showMessage('管理者権限が必要です', 'warning');
+                    return;
+                }
+
+                const period = this.availablePeriods.find(p => p.key === periodKey);
+                if (!period) return;
+
+                if (!confirm(`勤務表「${period.startDate} ～ ${period.endDate}」を完全に削除しますか?\n\nこの操作は元に戻せません。`)) {
+                    return;
+                }
+
+                try {
+                    await window.database.ref(`${window.DATA_ROOT}/workSchedules/${periodKey}`).remove();
+                    window.showMessage('勤務表を削除しました', 'success');
+                    
+                    await this.loadAvailablePeriods();
+                    
+                } catch (error) {
+                    console.error('❌ 勤務表削除エラー:', error);
+                    window.showMessage('勤務表の削除に失敗しました', 'error');
+                }
+            }
+
+            openScheduleEditor() {
+                if (window.userRole !== 'admin') {
+                    window.showMessage('管理者権限が必要です', 'warning');
+                    return;
+                }
+                
+                const targetUID = sessionStorage.getItem('targetUID');
+                const currentUsername = sessionStorage.getItem('currentUsername');
+                
+                if (!targetUID || !currentUsername) {
+                    window.showMessage('セッション情報が不足しています。再度ログインしてください。', 'error');
+                    return;
+                }
+                
+                const params = new URLSearchParams({
+                    uid: targetUID,
+                    username: currentUsername,
+                    role: window.userRole,
+                    timestamp: Date.now()
+                });
+                
+                const url = `work-schedule-editor.html?${params.toString()}`;
+                
+                const win = window.open(url, 'workScheduleEditor', 'width=1400,height=900,scrollbars=yes,resizable=yes');
+                
+                if (!win || win.closed || typeof win.closed === 'undefined') {
+                    if (confirm('新しいタブで開けませんでした。同じタブで勤務表エディタを開きますか?')) {
+                        window.location.href = url;
+                    } else {
+                        window.showMessage('勤務表エディタを開くには、ポップアップを許可してください', 'warning');
+                    }
+                } else {
+                    console.log('✅ 勤務表エディタを新しいタブで開きました');
+                }
+            }
+        }
+
+        // 初期化
+        window.ceScheduleManager = null;
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                window.ceScheduleManager = new CEScheduleManager();
+                await window.ceScheduleManager.init();
+                if (window.auditLogger) {
+    await window.auditLogger.logPageAccess('ce-schedule');
+}
+                console.log('✅ 勤務表管理初期化完了');
+            } catch (error) {
+                console.error('❌ 勤務表管理初期化エラー:', error);
+                window.showMessage('勤務表管理の初期化に失敗しました', 'error');
+            }
+        });
+    </script>
+</body>
+</html>
