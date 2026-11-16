@@ -1,2 +1,2 @@
-# ce-schedule-system-v2
+# WebApp-v2
 CEスケジュール管理システムv2
